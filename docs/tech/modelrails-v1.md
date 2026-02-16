@@ -425,6 +425,75 @@ All ERROR conditions must fail closed.
 
 ---
 
+## 10.3 Example Scenarios (ModelRails v1)
+
+Each scenario includes a realistic invariant spec and the expected decision outcome.
+
+### Scenario 1: Blocking a model deployment
+
+Invariant spec:
+
+```yaml
+version: 1
+invariants:
+  - name: production_resource_bounds
+    scope: model
+    severity: block
+    intent: "Block deployments that exceed production resource limits."
+    condition:
+      type: resource_bounds
+      parameters:
+        max_cpu: "8"
+        max_memory: "32Gi"
+        max_gpu: "1"
+```
+
+Expected decision: BLOCK (exit code 1) because observed resource requirements exceed the declared bounds.
+
+### Scenario 2: Warning on capability expansion
+
+Invariant spec:
+
+```yaml
+version: 1
+invariants:
+  - name: capability_expansion_review
+    scope: version
+    severity: warn
+    intent: "Warn on capability expansion beyond approved set."
+    condition:
+      type: capability_subset
+      parameters:
+        allowed_capabilities:
+          - summarization
+          - classification
+```
+
+Expected decision: WARN (exit code 0) because declared capabilities include items outside the allowed set.
+
+### Scenario 3: Blocking unsafe model interaction
+
+Invariant spec:
+
+```yaml
+version: 1
+invariants:
+  - name: block_unapproved_dependencies
+    scope: interaction
+    severity: block
+    intent: "Block connections to disallowed dependency models."
+    condition:
+      type: denylist
+      parameters:
+        denied_targets:
+          - external-chat-service
+          - untrusted-retrieval
+```
+
+Expected decision: BLOCK (exit code 1) when observed dependency targets include any denied model.
+
+---
+
 # 11. Non-Goals (Strictly Enforced)
 
 ModelRails v1 will NOT:
@@ -532,6 +601,18 @@ ModelRails must not:
 - Auto-approve missing constraints.
 
 Ambiguity must result in ERROR, not ALLOW.
+
+---
+
+## 13.5 Design Rationale (Tradeoffs and Rejected Alternatives)
+
+ModelRails v1 optimizes for determinism, auditability, and CI compatibility over flexibility. This drives a CLI-first architecture, explicit policy definitions, and strict validation of inputs.
+
+Key rejected alternatives:
+- **Runtime enforcement or admission control**: deferred to avoid persistent state and operational coupling.
+- **Adaptive or learning-based policy**: rejected due to non-determinism and audit complexity.
+- **Implicit defaults or auto-correction**: rejected to prevent silent policy drift and ambiguous approvals.
+- **Automatic remediation**: out of scope for v1; decisions remain read-only.
 
 ---
 
