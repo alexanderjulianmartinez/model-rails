@@ -1,0 +1,19 @@
+version: 1
+invariants:
+  - name: restrict_capability_expansion
+    scope: version
+    severity: block
+    intent: "Prevent undeclared capabilities in production deployments."
+    condition:
+      type: capability_subset
+      parameters:
+        allowed_capabilities:
+          - summarization
+          - classification
+    evidence_requirements:
+      - declared_capabilities
+      - deployment_environment
+    audit:
+      owner: platform-safety
+      rationale: "Ensure only approved capabilities are deployed."
+      ticket: MR-142

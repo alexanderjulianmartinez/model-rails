@@ -1,0 +1,19 @@
+version: 1
+invariants:
+  - name: prevent_unapproved_interaction
+    scope: interaction
+    severity: block
+    intent: "Allow only approved downstream model connections."
+    condition:
+      type: allowlist
+      parameters:
+        allowed_targets:
+          - embedding-service
+          - retrieval-service
+    evidence_requirements:
+      - dependency_models
+      - trust_domain
+    audit:
+      owner: infra-security
+      rationale: "Block unreviewed cross-model interactions."
+      ticket: SEC-88

@@ -103,7 +103,10 @@ func TestEvaluateWarn(t *testing.T) {
 	if result.Violations[0].Severity != "WARN" {
 		t.Fatalf("expected violation severity WARN, got %s", result.Violations[0].Severity)
 	}
-	if !strings.Contains(result.Explanation, "WARN") {
+	if result.Violations[0].Remediation == "" {
+		t.Fatalf("expected remediation, got empty")
+	}
+	if !strings.Contains(result.Explanation, "violation[1]") {
 		t.Fatalf("expected WARN explanation, got %s", result.Explanation)
 	}
 }
@@ -178,5 +181,42 @@ func TestEvaluateMissingMetadata(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "metadata.resource_requirements.cpu") {
 		t.Fatalf("expected resource requirements error, got %v", err)
+	}
+}
+
+func TestActionContextValidate(t *testing.T) {
+	valid := validAction()
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	invalid := validAction()
+	invalid.ActionType = ""
+	invalid.ModelName = ""
+	invalid.ModelVersion = ""
+	invalid.Environment = "bad-env"
+	invalid.Initiator = ""
+	invalid.Timestamp = "not-a-time"
+	invalid.MetadataSnapshotRef = ""
+
+	err := invalid.Validate()
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+
+	checks := []string{
+		"action.action_type",
+		"action.model_name",
+		"action.model_version",
+		"action.environment",
+		"action.initiator",
+		"action.timestamp",
+		"action.metadata_snapshot_ref",
+	}
+
+	for _, needle := range checks {
+		if !strings.Contains(err.Error(), needle) {
+			t.Fatalf("expected error to contain %s, got %v", needle, err)
+		}
 	}
 }
