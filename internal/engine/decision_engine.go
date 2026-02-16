@@ -39,6 +39,47 @@ type ActionContext struct {
 	MetadataSnapshotRef string `json:"metadata_snapshot_ref" yaml:"metadata_snapshot_ref"`
 }
 
+func (a ActionContext) Validate() error {
+	var issues []string
+	add := func(msg string) {
+		issues = append(issues, msg)
+	}
+
+	if strings.TrimSpace(a.ActionType) == "" {
+		add("action.action_type: required")
+	} else if !isValidActionType(a.ActionType) {
+		add("action.action_type: must be deploy, upgrade, connect, or promote")
+	}
+
+	if strings.TrimSpace(a.ModelName) == "" {
+		add("action.model_name: required")
+	}
+	if strings.TrimSpace(a.ModelVersion) == "" {
+		add("action.model_version: required")
+	}
+	if strings.TrimSpace(a.Environment) == "" {
+		add("action.environment: required")
+	} else if !isValidEnvironment(a.Environment) {
+		add("action.environment: must be dev, staging, or production")
+	}
+	if strings.TrimSpace(a.Initiator) == "" {
+		add("action.initiator: required")
+	}
+	if strings.TrimSpace(a.Timestamp) == "" {
+		add("action.timestamp: required")
+	} else if _, err := time.Parse(time.RFC3339, a.Timestamp); err != nil {
+		add("action.timestamp: must be RFC3339")
+	}
+	if strings.TrimSpace(a.MetadataSnapshotRef) == "" {
+		add("action.metadata_snapshot_ref: required")
+	}
+
+	if len(issues) > 0 {
+		return &ValidationError{Issues: issues}
+	}
+	return nil
+}
+
 type DependencyModel struct {
 	Name    string `json:"name" yaml:"name"`
 	Version string `json:"version" yaml:"version"`
@@ -70,6 +111,7 @@ type Violation struct {
 	Severity      string
 	Reason        string
 	Evidence      []EvidenceItem
+	Remediation   string
 }
 
 type DecisionResult struct {
@@ -128,44 +170,7 @@ func Evaluate(specDoc spec.InvariantSpec, action ActionContext, metadata ModelMe
 }
 
 func validateActionContext(action ActionContext) error {
-	var issues []string
-	add := func(msg string) {
-		issues = append(issues, msg)
-	}
-
-	if strings.TrimSpace(action.ActionType) == "" {
-		add("action.action_type: required")
-	} else if !isValidActionType(action.ActionType) {
-		add("action.action_type: must be deploy, upgrade, connect, or promote")
-	}
-
-	if strings.TrimSpace(action.ModelName) == "" {
-		add("action.model_name: required")
-	}
-	if strings.TrimSpace(action.ModelVersion) == "" {
-		add("action.model_version: required")
-	}
-	if strings.TrimSpace(action.Environment) == "" {
-		add("action.environment: required")
-	} else if !isValidEnvironment(action.Environment) {
-		add("action.environment: must be dev, staging, or production")
-	}
-	if strings.TrimSpace(action.Initiator) == "" {
-		add("action.initiator: required")
-	}
-	if strings.TrimSpace(action.Timestamp) == "" {
-		add("action.timestamp: required")
-	} else if _, err := time.Parse(time.RFC3339, action.Timestamp); err != nil {
-		add("action.timestamp: must be RFC3339")
-	}
-	if strings.TrimSpace(action.MetadataSnapshotRef) == "" {
-		add("action.metadata_snapshot_ref: required")
-	}
-
-	if len(issues) > 0 {
-		return &ValidationError{Issues: issues}
-	}
-	return nil
+	return action.Validate()
 }
 
 func validateMetadataForSpec(metadata ModelMetadata, invariants []spec.Invariant) error {
@@ -249,6 +254,7 @@ func evaluateInvariant(inv spec.Invariant, action ActionContext, metadata ModelM
 	violation := Violation{
 		InvariantName: inv.Name,
 		Severity:      strings.ToUpper(inv.Severity),
+		Remediation:   remediationFor(inv.Condition.Type),
 	}
 
 	switch inv.Condition.Type {
@@ -422,12 +428,62 @@ func buildExplanation(decision string, violations []Violation) string {
 	case DecisionAllow:
 		return "All invariants satisfied."
 	case DecisionWarn:
-		return fmt.Sprintf("%d invariant(s) violated with WARN severity.", len(violations))
+		return formatDecisionDetails("WARN", violations)
 	case DecisionBlock:
-		return fmt.Sprintf("%d invariant(s) violated with BLOCK severity.", len(violations))
+		return formatDecisionDetails("BLOCK", violations)
 	default:
 		return "Decision evaluation completed."
 	}
+}
+
+func formatDecisionDetails(severity string, violations []Violation) string {
+	if len(violations) == 0 {
+		return "No invariant violations."
+	}
+	lines := make([]string, 0, len(violations)+1)
+	lines = append(lines, fmt.Sprintf("%d invariant(s) violated with %s severity.", len(violations), severity))
+	for idx, v := range violations {
+		lines = append(lines, fmt.Sprintf(
+			"violation[%d]: invariant=%s severity=%s reason=%s remediation=%s evidence=%s",
+			idx+1,
+			v.InvariantName,
+			v.Severity,
+			v.Reason,
+			v.Remediation,
+			formatEvidence(v.Evidence),
+		))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func remediationFor(conditionType string) string {
+	switch conditionType {
+	case spec.ConditionCapabilitySubset:
+		return "Remove disallowed capabilities or update allowed_capabilities in the spec."
+	case spec.ConditionAllowlist:
+		return "Remove unapproved targets or add them to allowed_targets in the spec."
+	case spec.ConditionDenylist:
+		return "Remove denied targets or update denied_targets in the spec."
+	case spec.ConditionVersionPin:
+		return "Use an allowed version or update allowed_versions/exact_version in the spec."
+	case spec.ConditionEnvironmentGate:
+		return "Use an allowed environment or update allowed_environments in the spec."
+	case spec.ConditionResourceBounds:
+		return "Reduce resource requirements or update max_* bounds in the spec."
+	default:
+		return "Update the invariant definition or input data to satisfy this condition."
+	}
+}
+
+func formatEvidence(items []EvidenceItem) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%s=%v", item.Key, item.Value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 func requiredStringSlice(params map[string]interface{}, key string) ([]string, error) {
